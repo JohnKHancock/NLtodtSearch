@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NL-to-dtSearch</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    #mainApp { height: 100vh; display: flex; flex-direction: column; }
+    .app-body { flex: 1; display: flex; overflow: hidden; min-height: 0; }
+
+    /* ── Resize dividers ───────────────────────────────────────────────────── */
+    .resize-divider {
+      width: 5px;
+      flex-shrink: 0;
+      cursor: col-resize;
+      background: var(--bs-border-color);
+      transition: background 0.15s;
+      z-index: 10;
+    }
+    .resize-divider:hover, .resize-divider.dragging { background: #0d6efd; }
+    body.col-resizing { cursor: col-resize !important; user-select: none !important; }
+    body.col-resizing * { cursor: col-resize !important; }
+
+    /* ── Sidebar ───────────────────────────────────────────────────────────── */
+    .sidebar {
+      width: 220px; min-width: 140px; max-width: 400px;
+      flex-shrink: 0;
+      display: flex; flex-direction: column;
+      padding: 0.75rem; overflow: hidden;
+      border-right: none; /* divider handles the border */
+    }
+    #sessionList { flex: 1; overflow-y: auto; margin-bottom: 0.5rem; }
+    .session-item {
+      cursor: pointer; padding: 0.35rem 0.5rem; border-radius: 4px;
+      font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .session-item:hover { background: var(--bs-secondary-bg); }
+    .session-item.active { background: #0d6efd; color: #fff; }
+
+    /* ── Chat column ───────────────────────────────────────────────────────── */
+    .chat-col { flex: 1; min-width: 200px; display: flex; flex-direction: column; padding: 0.75rem; overflow: hidden; }
+    #chatMessages { flex: 1; overflow-y: auto; padding-right: 0.25rem; }
+
+    .msg-user { text-align: right; margin-bottom: 0.6rem; }
+    .msg-user .bubble {
+      display: inline-block; background: #0d6efd; color: #fff;
+      padding: 0.45rem 0.85rem; border-radius: 16px 16px 4px 16px;
+      max-width: 80%; text-align: left; word-break: break-word;
+    }
+    .msg-assistant { margin-bottom: 0.6rem; }
+    .msg-assistant .bubble {
+      display: inline-block;
+      background: var(--bubble-asst-bg);
+      padding: 0.45rem 0.85rem; border-radius: 16px 16px 16px 4px;
+      max-width: 85%; word-break: break-word;
+    }
+    .msg-assistant .bubble p:last-child { margin-bottom: 0; }
+    .typing { color: var(--bs-secondary-color); font-style: italic; font-size: 0.875rem; }
+
+    /* ── Results panel ─────────────────────────────────────────────────────── */
+    .results-col {
+      width: 320px; min-width: 200px; max-width: 500px;
+      flex-shrink: 0;
+      display: flex; flex-direction: column;
+      padding: 0.75rem; overflow-y: auto;
+    }
+    .result-label { font-size: 0.7rem; font-weight: 700; color: var(--bs-secondary-color); text-transform: uppercase; margin-bottom: 0.2rem; }
+    .result-value {
+      background: var(--bs-tertiary-bg);
+      border: 1px solid var(--bs-border-color);
+      border-radius: 6px; padding: 0.45rem 0.65rem;
+      font-size: 0.875rem; white-space: pre-wrap; word-break: break-word; min-height: 2rem;
+    }
+    .result-value.query { font-family: monospace; font-size: 0.95rem; font-weight: 600; color: #0d6efd; }
+    .confidence-pill { display: inline-block; padding: 0.25em 0.7em; border-radius: 99px; font-size: 0.78rem; font-weight: 700; }
+    .confidence-HIGH   { background: #d1fae5; color: #065f46; }
+    .confidence-MEDIUM { background: #fef3c7; color: #92400e; }
+    .confidence-LOW    { background: #fee2e2; color: #991b1b; }
+    .disclaimer { font-size: 0.72rem; color: var(--bs-secondary-color); font-style: italic; }
+
+    /* ── Dark mode custom overrides ────────────────────────────────────────── */
+    [data-bs-theme="light"] { --bubble-asst-bg: #f1f3f5; }
+    [data-bs-theme="dark"]  { --bubble-asst-bg: #2b2d31; }
+    [data-bs-theme="dark"] .confidence-HIGH   { background: #064e3b; color: #6ee7b7; }
+    [data-bs-theme="dark"] .confidence-MEDIUM { background: #78350f; color: #fcd34d; }
+    [data-bs-theme="dark"] .confidence-LOW    { background: #7f1d1d; color: #fca5a5; }
+    [data-bs-theme="dark"] .result-value.query { color: #60a5fa; }
+
+    /* ── Login overlay ─────────────────────────────────────────────────────── */
+    #loginOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.5);
+      z-index: 9999; display: flex; align-items: center; justify-content: center;
+    }
+    #loginCard { width: 340px; }
+
+    /* ── Misc ──────────────────────────────────────────────────────────────── */
+    .toolbar { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-top: 0.4rem; }
+    #statusMsg { font-size: 0.78rem; margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<!-- ── Login overlay ──────────────────────────────────────────────────────── -->
+<div id="loginOverlay">
+  <div id="loginCard" class="card shadow-lg">
+    <div class="card-body p-4">
+      <h5 class="card-title text-center mb-4">Sign in to NL-to-dtSearch</h5>
+      <div id="loginError" class="alert alert-danger d-none py-2"></div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Username</label>
+        <input id="loginUser" type="text" class="form-control" autocomplete="username">
+      </div>
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Password</label>
+        <input id="loginPass" type="password" class="form-control" autocomplete="current-password">
+      </div>
+      <button id="loginBtn" class="btn btn-primary w-100">Sign In</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Main app ───────────────────────────────────────────────────────────── -->
+<div id="mainApp" class="d-none">
+
+  <!-- Navbar -->
+  <nav class="navbar border-bottom px-3 py-2 flex-shrink-0" style="background:var(--bs-body-bg)">
+    <span class="navbar-brand fw-bold mb-0 h1" style="font-size:1rem">NL-to-dtSearch</span>
+    <div class="d-flex align-items-center gap-2">
+      <span id="welcomeMsg" class="text-muted small"></span>
+      <button id="themeToggle" class="btn btn-sm btn-outline-secondary">🌙 Dark</button>
+      <button id="logoutBtn" class="btn btn-sm btn-outline-secondary">Sign Out</button>
+    </div>
+  </nav>
+
+  <!-- Body: three columns + two resize dividers -->
+  <div class="app-body">
+
+    <!-- Left: Session history -->
+    <div class="sidebar" id="sidebar">
+      <h6 class="mb-2" style="font-size:.85rem">Session History</h6>
+      <div id="sessionList"></div>
+      <div class="d-flex gap-1">
+        <button id="newSessionBtn" class="btn btn-sm btn-outline-primary flex-fill">New</button>
+        <button id="deleteSessionBtn" class="btn btn-sm btn-outline-danger flex-fill">Delete</button>
+      </div>
+    </div>
+
+    <div class="resize-divider" id="dividerLeft" title="Drag to resize"></div>
+
+    <!-- Center: Chat -->
+    <div class="chat-col" id="chatCol">
+      <div id="chatMessages"></div>
+      <div class="mt-2">
+        <div class="input-group">
+          <textarea id="messageInput" class="form-control" rows="2"
+            placeholder="Describe what you want to find (e.g., 'emails from acme.com about invoices')..."></textarea>
+          <button id="sendBtn" class="btn btn-primary px-3">Send</button>
+        </div>
+        <div class="toolbar">
+          <label class="btn btn-sm btn-outline-secondary mb-0">
+            📎 Upload Document
+            <input type="file" id="fileUpload" class="d-none" accept=".pdf,.docx,.txt">
+          </label>
+          <button id="downloadBtn" class="btn btn-sm btn-outline-secondary">⬇ History</button>
+          <button id="clearBtn" class="btn btn-sm btn-outline-secondary">🗑 Clear</button>
+          <span id="statusMsg" class="text-muted"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="resize-divider" id="dividerRight" title="Drag to resize"></div>
+
+    <!-- Right: Query results -->
+    <div class="results-col" id="resultsCol">
+      <h6 class="mb-3" style="font-size:.85rem">Query Result</h6>
+
+      <div id="resultSection" class="d-none">
+        <div class="mb-2">
+          <div class="d-flex justify-content-between align-items-center mb-1">
+            <span class="result-label">dtSearch Query</span>
+            <button class="btn btn-link btn-sm p-0" style="font-size:.7rem" onclick="copyQuery()">Copy</button>
+          </div>
+          <div id="queryValue" class="result-value query"></div>
+        </div>
+        <div class="mb-2">
+          <div class="result-label">Explanation</div>
+          <div id="explanationValue" class="result-value"></div>
+        </div>
+        <div class="mb-2">
+          <div class="result-label">Alternative Queries</div>
+          <div id="alternativesValue" class="result-value"></div>
+        </div>
+        <div class="mb-2">
+          <div class="result-label">Confidence</div>
+          <div id="confidenceValue"></div>
+        </div>
+        <div id="warningBox" class="alert alert-warning py-2 d-none small mb-2"></div>
+        <div class="disclaimer mb-3">
+          This query is a suggestion. Verify syntax and results before use in legal proceedings.
+        </div>
+        <div id="feedbackSection">
+          <div class="result-label mb-1">Was this query correct?</div>
+          <div class="d-flex gap-2 mb-2">
+            <button id="correctBtn" class="btn btn-sm btn-success flex-fill">✓ Correct</button>
+            <button id="incorrectBtn" class="btn btn-sm btn-danger flex-fill">✗ Incorrect</button>
+          </div>
+          <div id="incorrectForm" class="d-none mb-2">
+            <textarea id="feedbackComment" class="form-control form-control-sm mb-2" rows="2"
+              placeholder="What was wrong? (optional)"></textarea>
+            <button id="submitFeedbackBtn" class="btn btn-sm btn-secondary w-100">Submit Feedback</button>
+          </div>
+          <div id="feedbackStatus" class="text-success small d-none"></div>
+        </div>
+      </div>
+
+      <div id="emptyResults" class="text-muted small">
+        Results will appear here after your first query.
+      </div>
+    </div>
+
+  </div><!-- .app-body -->
+</div><!-- #mainApp -->
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────
+const state = {
+  username: null, sessionId: null, history: [],
+  lastMessageId: null, sessions: [], selectedSessionId: null,
+};
+
+// ── Utilities ──────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function md(text) {
+  try { return marked.parse(text || ''); } catch { return esc(text || ''); }
+}
+function setStatus(msg, isError = false) {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className = (isError ? 'text-danger' : 'text-muted') + ' small';
+  el.style.marginLeft = 'auto';
+}
+function copyQuery() {
+  navigator.clipboard.writeText(document.getElementById('queryValue').textContent)
+    .then(() => setStatus('Copied!'));
+}
+
+// ── Theme toggle ───────────────────────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem('theme') || 'light';
+  applyTheme(saved);
+})();
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-bs-theme', theme);
+  const btn = document.getElementById('themeToggle');
+  if (btn) btn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+  localStorage.setItem('theme', theme);
+}
+
+document.getElementById('themeToggle').addEventListener('click', () => {
+  const current = document.documentElement.getAttribute('data-bs-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+});
+
+// ── Column resize ──────────────────────────────────────────────────────────
+(function initResize() {
+  const sidebar    = document.getElementById('sidebar');
+  const resultsCol = document.getElementById('resultsCol');
+  const divLeft    = document.getElementById('dividerLeft');
+  const divRight   = document.getElementById('dividerRight');
+
+  // Restore saved widths
+  const sw = localStorage.getItem('sidebarWidth');
+  const rw = localStorage.getItem('resultsWidth');
+  if (sw) sidebar.style.width    = sw;
+  if (rw) resultsCol.style.width = rw;
+
+  let dragging = null, startX = 0, startWidth = 0;
+
+  function onMouseDown(e, divider, targetEl) {
+    dragging = { divider, targetEl };
+    startX = e.clientX;
+    startWidth = targetEl.offsetWidth;
+    divider.classList.add('dragging');
+    document.body.classList.add('col-resizing');
+    e.preventDefault();
+  }
+
+  divLeft.addEventListener('mousedown',  e => onMouseDown(e, divLeft,  sidebar));
+  divRight.addEventListener('mousedown', e => onMouseDown(e, divRight, resultsCol));
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    // Left divider grows sidebar; right divider: dragging left = smaller results
+    const delta = dragging.divider === divLeft ? dx : -dx;
+    const { min, max } = getMinMax(dragging.targetEl);
+    const newWidth = Math.min(max, Math.max(min, startWidth + delta));
+    dragging.targetEl.style.width = newWidth + 'px';
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging.divider.classList.remove('dragging');
+    document.body.classList.remove('col-resizing');
+    // Persist
+    localStorage.setItem('sidebarWidth',  sidebar.style.width);
+    localStorage.setItem('resultsWidth', resultsCol.style.width);
+    dragging = null;
+  });
+
+  function getMinMax(el) {
+    return {
+      min: parseInt(el.style.minWidth || getComputedStyle(el).minWidth) || 140,
+      max: parseInt(el.style.maxWidth || getComputedStyle(el).maxWidth) || 500,
+    };
+  }
+})();
+
+// ── Auth ───────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    const r = await fetch('/api/me');
+    if (r.ok) { state.username = (await r.json()).username; showApp(); }
+    else showLogin();
+  } catch { showLogin(); }
+}
+
+function showLogin() {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('mainApp').classList.add('d-none');
+}
+function showApp() {
+  document.getElementById('loginOverlay').style.display = 'none';
+  document.getElementById('mainApp').classList.remove('d-none');
+  document.getElementById('welcomeMsg').textContent = `Welcome, ${state.username}`;
+  loadSessions();
+}
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginError');
+  errEl.classList.add('d-none');
+  try {
+    const r = await fetch('/auth/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password}),
+    });
+    if (r.ok) { state.username = (await r.json()).username; showApp(); }
+    else { errEl.textContent = 'Invalid username or password.'; errEl.classList.remove('d-none'); }
+  } catch { errEl.textContent = 'Connection error.'; errEl.classList.remove('d-none'); }
+});
+document.getElementById('loginPass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('loginBtn').click();
+});
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await fetch('/auth/logout', {method: 'POST'});
+  Object.assign(state, {username:null, sessionId:null, history:[], lastMessageId:null, selectedSessionId:null});
+  showLogin();
+});
+
+// ── Sessions ───────────────────────────────────────────────────────────────
+async function loadSessions() {
+  try {
+    const r = await fetch('/api/sessions');
+    if (!r.ok) return;
+    state.sessions = await r.json();
+    renderSessionList();
+  } catch {}
+}
+
+function renderSessionList() {
+  const el = document.getElementById('sessionList');
+  if (!state.sessions.length) {
+    el.innerHTML = '<div class="text-muted" style="font-size:.78rem">No saved sessions</div>';
+    return;
+  }
+  el.innerHTML = state.sessions.map(s => {
+    const date = (s.created_at || '').slice(0, 10);
+    const label = `${s.session_name} (${date})`;
+    const active = s.id === state.selectedSessionId ? 'active' : '';
+    return `<div class="session-item ${active}" data-id="${s.id}" title="${esc(label)}">${esc(label)}</div>`;
+  }).join('');
+  el.querySelectorAll('.session-item').forEach(item => {
+    item.addEventListener('click', () => loadSession(parseInt(item.dataset.id)));
+  });
+}
+
+async function loadSession(sessionId) {
+  const r = await fetch(`/api/sessions/${sessionId}`);
+  if (!r.ok) return;
+  const data = await r.json();
+  state.sessionId = sessionId; state.selectedSessionId = sessionId;
+  state.history = []; state.lastMessageId = null;
+  clearResults();
+  document.getElementById('chatMessages').innerHTML = '';
+  let lastToolResult = null, lastMsgId = null;
+  for (const msg of (data.messages || [])) {
+    appendMessage(msg.role, msg.content);
+    state.history.push({role: msg.role, content: msg.content});
+    if (msg.role === 'assistant' && msg.dtsearch_result) {
+      lastToolResult = msg.dtsearch_result; lastMsgId = msg.id;
+    }
+  }
+  state.lastMessageId = lastMsgId;
+  if (lastToolResult) showResults(lastToolResult, null);
+  renderSessionList();
+}
+
+document.getElementById('newSessionBtn').addEventListener('click', () => {
+  Object.assign(state, {sessionId:null, selectedSessionId:null, history:[], lastMessageId:null});
+  document.getElementById('chatMessages').innerHTML = '';
+  clearResults(); renderSessionList();
+  setStatus('New session started.');
+});
+
+document.getElementById('deleteSessionBtn').addEventListener('click', async () => {
+  if (!state.selectedSessionId) { setStatus('Select a session to delete.', true); return; }
+  if (!confirm('Delete this session?')) return;
+  await fetch(`/api/sessions/${state.selectedSessionId}`, {method: 'DELETE'});
+  if (state.sessionId === state.selectedSessionId) {
+    Object.assign(state, {sessionId:null, history:[], lastMessageId:null});
+    document.getElementById('chatMessages').innerHTML = '';
+    clearResults();
+  }
+  state.selectedSessionId = null;
+  await loadSessions();
+});
+
+// ── Chat ───────────────────────────────────────────────────────────────────
+function appendMessage(role, content) {
+  const wrap = document.createElement('div');
+  wrap.className = role === 'user' ? 'msg-user' : 'msg-assistant';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (role === 'assistant') bubble.innerHTML = md(content);
+  else bubble.textContent = content;
+  wrap.appendChild(bubble);
+  const chat = document.getElementById('chatMessages');
+  chat.appendChild(wrap);
+  chat.scrollTop = chat.scrollHeight;
+  return bubble;
+}
+
+function showResults(toolResult, validationWarning) {
+  if (!toolResult) return;
+  document.getElementById('queryValue').textContent = toolResult.dtSearch_query || '';
+  document.getElementById('explanationValue').textContent = toolResult.explanation || '';
+  const alts = (toolResult.alternatives || [])
+    .map((a, i) => `${i+1}. ${a.query||''} — ${a.strategy||''}`).join('\n') || 'None provided';
+  document.getElementById('alternativesValue').textContent = alts;
+  const conf = (toolResult.confidence || '').toUpperCase();
+  document.getElementById('confidenceValue').innerHTML =
+    `<span class="confidence-pill confidence-${conf}">${conf || 'N/A'}</span>`;
+  const warnings = [];
+  if (validationWarning) warnings.push(`⚠️ ${validationWarning}`);
+  if (toolResult.confidence === 'low') warnings.push('⚠️ Low confidence — consider rephrasing or adding more detail.');
+  const warnEl = document.getElementById('warningBox');
+  if (warnings.length) { warnEl.textContent = warnings.join('\n'); warnEl.classList.remove('d-none'); }
+  else warnEl.classList.add('d-none');
+  document.getElementById('resultSection').classList.remove('d-none');
+  document.getElementById('emptyResults').classList.add('d-none');
+  document.getElementById('incorrectForm').classList.add('d-none');
+  document.getElementById('feedbackStatus').classList.add('d-none');
+  document.getElementById('feedbackComment').value = '';
+}
+
+function clearResults() {
+  document.getElementById('resultSection').classList.add('d-none');
+  document.getElementById('emptyResults').classList.remove('d-none');
+  document.getElementById('warningBox').classList.add('d-none');
+}
+
+async function streamSSE(url, body, onText, onDone, onError) {
+  const r = await fetch(url, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  });
+  if (r.status === 401) { showLogin(); return; }
+  if (!r.ok) { const e = await r.json().catch(()=>({})); onError(e.detail || 'Request failed'); return; }
+  const reader = r.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, {stream: true});
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const raw = line.slice(6).trim();
+      if (raw === '[DONE]') return;
+      let event;
+      try { event = JSON.parse(raw); } catch { continue; }
+      if (event.type === 'text') onText(event.chunk);
+      else if (event.type === 'done') onDone(event);
+      else if (event.type === 'error') { onError(event.message); return; }
+    }
+  }
+}
+
+async function sendMessage() {
+  const input = document.getElementById('messageInput');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+  setSendDisabled(true);
+  setStatus('Thinking…');
+  appendMessage('user', message);
+  const bubble = appendMessage('assistant', '');
+  bubble.innerHTML = '<span class="typing">Thinking…</span>';
+  let fullText = '';
+  await streamSSE(
+    '/api/chat/stream',
+    {message, session_id: state.sessionId, history: state.history},
+    chunk => {
+      fullText += chunk;
+      bubble.innerHTML = md(fullText);
+      document.getElementById('chatMessages').scrollTop = 999999;
+    },
+    async event => {
+      state.sessionId = event.session_id; state.history = event.new_history;
+      state.lastMessageId = event.message_id; state.selectedSessionId = event.session_id;
+      if (event.tool_result) showResults(event.tool_result, event.validation_warning);
+      await loadSessions(); setStatus('');
+    },
+    msg => { bubble.innerHTML = `<strong>Error:</strong> ${esc(msg)}`; setStatus('', false); },
+  );
+  setSendDisabled(false);
+  input.focus();
+}
+
+function setSendDisabled(disabled) {
+  document.getElementById('sendBtn').disabled = disabled;
+  document.getElementById('messageInput').disabled = disabled;
+}
+document.getElementById('sendBtn').addEventListener('click', sendMessage);
+document.getElementById('messageInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+// ── File upload ────────────────────────────────────────────────────────────
+document.getElementById('fileUpload').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+  setStatus('Uploading…');
+  const form = new FormData();
+  form.append('file', file);
+  let uploadData;
+  try {
+    const r = await fetch('/api/upload', {method: 'POST', body: form});
+    if (!r.ok) { const err = await r.json().catch(()=>({})); setStatus(err.detail||'Upload failed', true); return; }
+    uploadData = await r.json();
+  } catch (err) { setStatus('Upload error: ' + err.message, true); return; }
+  const {text, filename} = uploadData;
+  setStatus('Analyzing…');
+  appendMessage('user', `[Uploaded document: ${filename}]`);
+  const bubble = appendMessage('assistant', '');
+  bubble.innerHTML = '<span class="typing">Analyzing…</span>';
+  let fullText = '';
+  await streamSSE(
+    '/api/analyze/stream',
+    {text, filename, session_id: state.sessionId, history: state.history},
+    chunk => {
+      fullText += chunk;
+      bubble.innerHTML = md(fullText);
+      document.getElementById('chatMessages').scrollTop = 999999;
+    },
+    async event => {
+      state.sessionId = event.session_id; state.history = event.new_history;
+      state.selectedSessionId = event.session_id;
+      await loadSessions(); setStatus('');
+    },
+    msg => { bubble.innerHTML = `<strong>Error:</strong> ${esc(msg)}`; setStatus('', false); },
+  );
+});
+
+// ── Toolbar ────────────────────────────────────────────────────────────────
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  const msgs = document.getElementById('chatMessages').querySelectorAll('.msg-user, .msg-assistant');
+  if (!msgs.length) { setStatus('Nothing to download.', true); return; }
+  const lines = [];
+  msgs.forEach(m => {
+    const role = m.classList.contains('msg-user') ? 'User' : 'Assistant';
+    lines.push(`${role}: ${m.querySelector('.bubble').textContent}\n${'-'.repeat(60)}\n`);
+  });
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([lines.join('\n')], {type:'text/plain'})),
+    download: 'chat_history.txt',
+  });
+  a.click(); URL.revokeObjectURL(a.href);
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  if (!confirm('Clear the current chat?')) return;
+  Object.assign(state, {sessionId:null, selectedSessionId:null, history:[], lastMessageId:null});
+  document.getElementById('chatMessages').innerHTML = '';
+  clearResults(); renderSessionList();
+  setStatus('Chat cleared.');
+});
+
+// ── Feedback ───────────────────────────────────────────────────────────────
+async function postFeedback(rating, comment = null) {
+  if (!state.lastMessageId) return;
+  await fetch('/api/feedback', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({message_id: state.lastMessageId, rating, comment}),
+  });
+  const el = document.getElementById('feedbackStatus');
+  el.textContent = '✓ Feedback recorded. Thank you!';
+  el.classList.remove('d-none');
+}
+document.getElementById('correctBtn').addEventListener('click', () => postFeedback('correct'));
+document.getElementById('incorrectBtn').addEventListener('click', () => {
+  document.getElementById('incorrectForm').classList.toggle('d-none');
+});
+document.getElementById('submitFeedbackBtn').addEventListener('click', () => {
+  const comment = document.getElementById('feedbackComment').value.trim();
+  postFeedback('incorrect', comment || null);
+  document.getElementById('incorrectForm').classList.add('d-none');
+  document.getElementById('feedbackComment').value = '';
+});
+
+// ── Init ───────────────────────────────────────────────────────────────────
+checkAuth();
+</script>
+</body>
+</html>

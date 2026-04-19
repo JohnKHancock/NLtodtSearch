@@ -1,7 +1,19 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:help.relativity.com)"
+      "WebFetch(domain:help.relativity.com)",
+      "Skill(claude-api)",
+      "Bash(python -c \"import config; from core.prompt_builder import PromptBuilder; from core.validator import validate_query; from core.converter import DTSearchConverter; from core.db import init_db; print\\('All imports OK'\\)\")",
+      "Bash(pip install *)",
+      "Bash(python -m pytest tests/unit/ -v)",
+      "Bash(python -c ' *)",
+      "Bash(mkdir -p application/core)",
+      "Bash(mv app.py application/app.py)",
+      "Bash(mv config.py application/config.py)",
+      "Bash(mv requirements.txt application/requirements.txt)",
+      "Bash(mv .env.example application/.env.example)",
+      "Bash(python -c \"import gradio; print\\(gradio.__version__\\)\")",
+      "Bash(python *)"
     ]
   }
 }
