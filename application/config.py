@@ -6,7 +6,7 @@ load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-4-6"
 MAX_INPUT_CHARS = 2000
-MAX_FILE_SIZE_MB = 10
+MAX_FILE_SIZE_MB = 50
 MAX_HISTORY_TOKENS = 8000
 DB_PATH = os.getenv("DB_PATH", "sessions.db")
 

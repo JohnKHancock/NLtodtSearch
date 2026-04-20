@@ -13,7 +13,12 @@ class DTSearchConverter:
         self._validator = validator
         self._client = anthropic.Anthropic()
 
-    def stream_convert(self, user_message: str, history: list[dict]) -> Generator:
+    def stream_convert(
+        self,
+        user_message: str,
+        history: list[dict],
+        document_context: dict | None = None,
+    ) -> Generator:
         """
         Generator yielding events:
           ("text", str)          — streamed text chunk
@@ -23,8 +28,32 @@ class DTSearchConverter:
         system = self._pb.get_system_prompt_with_cache()
         tools = self._pb.get_tools()
 
-        messages = history + [{"role": "user", "content": user_message}]
-        messages = self._trim_messages(messages, system, tools)
+        # Build pinned document prefix — always sent but never stored in history
+        doc_prefix: list[dict] = []
+        if document_context and document_context.get("text"):
+            filename = document_context.get("filename", "document")
+            raw = document_context["text"]
+            truncated = raw[:50000]
+            notice = " [truncated to 50,000 characters]" if len(raw) > 50000 else ""
+            doc_prefix = [
+                {
+                    "role": "user",
+                    "content": (
+                        f"[Reference document: {filename}{notice}]\n\n{truncated}"
+                    ),
+                },
+                {
+                    "role": "assistant",
+                    "content": (
+                        "I have reviewed the document and will use its content to "
+                        "answer your questions and generate dtSearch queries."
+                    ),
+                },
+            ]
+
+        conv_messages = history + [{"role": "user", "content": user_message}]
+        conv_messages = self._trim_messages(conv_messages, system, tools)
+        messages = doc_prefix + conv_messages
 
         full_text = ""
         tool_result = None
@@ -64,7 +93,8 @@ class DTSearchConverter:
             if not assistant_text and tool_result:
                 assistant_text = tool_result.get("explanation", "")
 
-            new_history = messages + [{"role": "assistant", "content": assistant_text}] if assistant_text else messages
+            # new_history excludes the doc prefix — it is re-injected fresh each call
+            new_history = conv_messages + [{"role": "assistant", "content": assistant_text}] if assistant_text else conv_messages
 
             yield ("done", {
                 "text": full_text,
@@ -84,17 +114,19 @@ class DTSearchConverter:
         except Exception as e:
             yield ("error", f"Unexpected error: {str(e)}")
 
-    def analyze_document(self, text: str, history: list[dict]) -> Generator:
+    def analyze_document(self, text: str, filename: str, history: list[dict]) -> Generator:
         """
         Analyze an uploaded document and suggest dtSearch search terms.
         Yields ("text", chunk) and ("done", {text, new_history}).
+        new_history uses a compact placeholder — the full text is stored in
+        documentContext on the frontend and re-injected via stream_convert.
         """
         system = self._pb.get_system_prompt_with_cache()
         truncated = text[:50000]
-        notice = " [Document truncated to 50,000 characters]" if len(text) > 50000 else ""
+        notice = " [truncated to 50,000 characters]" if len(text) > 50000 else ""
 
         prompt = (
-            f"I've uploaded a document{notice}. Please review it and suggest dtSearch search terms "
+            f"I've uploaded a document: {filename}{notice}. Please review it and suggest dtSearch search terms "
             "organized by category: people/entities, dates, key concepts, and financial/transaction terms. "
             "For each category, list 3-5 specific search terms or phrases that would be useful for eDiscovery. "
             "Do not generate a single query — just suggest terms.\n\n"
@@ -116,8 +148,13 @@ class DTSearchConverter:
                     full_text += chunk
                     yield ("text", chunk)
 
-            new_history = messages + [{"role": "assistant", "content": full_text.strip()}]
-            yield ("done", {"text": full_text, "new_history": new_history})
+            # Compact new_history — the full document text lives in state.documentContext
+            # on the frontend and is re-injected into every subsequent stream_convert call.
+            compact_history = history + [
+                {"role": "user", "content": f"[Uploaded document: {filename}]"},
+                {"role": "assistant", "content": full_text.strip()},
+            ]
+            yield ("done", {"text": full_text, "new_history": compact_history})
 
         except Exception as e:
             yield ("error", f"Document analysis error: {str(e)}")

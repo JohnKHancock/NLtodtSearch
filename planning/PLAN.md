@@ -406,6 +406,16 @@ Document upload is integrated into the main chat (not a separate mode).
 
 **Token limit guard:** If the extracted text exceeds ~50,000 characters, truncate and notify the user.
 
+### Document Context Persistence
+
+After a document is analyzed, its text is retained in the frontend session state (`state.documentContext`) and re-injected as a pinned context block into every subsequent `stream_convert` call. This ensures the LLM always has access to the document content when the user asks follow-up questions (e.g., "Using this document, suggest 10 dtSearches for Ken Lay's emails").
+
+**Key design decisions:**
+- The document text is stored in frontend memory only — it is not embedded in the conversation history stored in SQLite. This avoids bloating the history and prevents the token-trimming logic from silently dropping the document.
+- On each chat request, the document is injected as a pinned `user/assistant` message pair at the start of the message list, before the trimmed conversation history. It is never subject to `_trim_messages`.
+- Compact history: `analyze_document` stores only a short label (`[Uploaded document: filename]`) in `new_history`, not the full text.
+- `state.documentContext` is cleared on: New Session, Clear Chat, and Logout. It is not restored when loading an old session from history — the user must re-upload the document to resume document-grounded queries.
+
 ---
 
 ## 10. Session Persistence (SQLite)

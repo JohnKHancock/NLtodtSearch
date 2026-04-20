@@ -166,6 +166,7 @@ async def chat_stream(request: Request, username: str = Depends(_require_auth)):
     message: str = body.get("message", "").strip()
     session_id: Optional[int] = body.get("session_id")
     history: list = body.get("history", [])
+    document_context: Optional[dict] = body.get("document_context")
 
     if not message:
         raise HTTPException(400, "Empty message")
@@ -176,7 +177,7 @@ async def chat_stream(request: Request, username: str = Depends(_require_auth)):
         _session_id = session_id
         full_text = ""
 
-        for event_type, data in _converter.stream_convert(message, history):
+        for event_type, data in _converter.stream_convert(message, history, document_context):
             if event_type == "text":
                 full_text += data
                 yield f"data: {json.dumps({'type': 'text', 'chunk': data})}\n\n"
@@ -225,7 +226,7 @@ async def analyze_stream(request: Request, username: str = Depends(_require_auth
         _session_id = session_id
         full_text = ""
 
-        for event_type, data in _converter.analyze_document(text, history):
+        for event_type, data in _converter.analyze_document(text, filename, history):
             if event_type == "text":
                 full_text += data
                 yield f"data: {json.dumps({'type': 'text', 'chunk': data})}\n\n"
@@ -248,6 +249,40 @@ async def analyze_stream(request: Request, username: str = Depends(_require_auth
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Archive / Unarchive ───────────────────────────────────────────────────────
+
+@app.post("/api/archive")
+async def archive_history(request: Request, username: str = Depends(_require_auth)):
+    data = await request.json()
+    path = data.get("path", "").strip()
+    if not path:
+        raise HTTPException(400, "No file path provided")
+    try:
+        archive = db.export_sessions(username)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(archive, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to write archive: {e}")
+    return {"ok": True, "count": len(archive["sessions"])}
+
+
+@app.post("/api/unarchive")
+async def unarchive_history(request: Request, username: str = Depends(_require_auth)):
+    data = await request.json()
+    path = data.get("path", "").strip()
+    if not path:
+        raise HTTPException(400, "No file path provided")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            archive = json.load(f)
+        count = db.import_sessions(username, archive)
+    except FileNotFoundError:
+        raise HTTPException(400, f"File not found: {path}")
+    except Exception as e:
+        raise HTTPException(400, f"Failed to read archive: {e}")
+    return {"ok": True, "count": count}
 
 
 # ── Static & SPA ──────────────────────────────────────────────────────────────

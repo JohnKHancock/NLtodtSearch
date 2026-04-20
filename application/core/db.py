@@ -153,3 +153,63 @@ def save_feedback(
             (message_id, username, rating, comment, _now()),
         )
     conn.close()
+
+
+def export_sessions(username: str, session_ids: Optional[list] = None, db_path: str = DB_PATH) -> dict:
+    conn = _connect(db_path)
+    if session_ids:
+        placeholders = ','.join('?' * len(session_ids))
+        rows = conn.execute(
+            f"SELECT * FROM sessions WHERE username = ? AND id IN ({placeholders}) ORDER BY updated_at DESC",
+            [username] + list(session_ids),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE username = ? ORDER BY updated_at DESC",
+            (username,),
+        ).fetchall()
+    sessions_data = []
+    for row in rows:
+        msgs = conn.execute(
+            "SELECT role, content, dtsearch_result, created_at FROM messages WHERE session_id = ? ORDER BY id",
+            (row["id"],),
+        ).fetchall()
+        sessions_data.append({
+            "session_name": row["session_name"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+            "messages": [
+                {
+                    "role": m["role"],
+                    "content": m["content"],
+                    "dtsearch_result": json.loads(m["dtsearch_result"]) if m["dtsearch_result"] else None,
+                    "created_at": m["created_at"],
+                }
+                for m in msgs
+            ],
+        })
+    conn.close()
+    return {"version": 1, "exported_at": _now(), "username": username, "sessions": sessions_data}
+
+
+def import_sessions(username: str, archive: dict, db_path: str = DB_PATH) -> int:
+    count = 0
+    for s in archive.get("sessions", []):
+        conn = _connect(db_path)
+        with conn:
+            cur = conn.execute(
+                "INSERT INTO sessions (username, session_name, created_at, updated_at) VALUES (?, ?, ?, ?)",
+                (username, s.get("session_name", "Imported Session"),
+                 s.get("created_at", _now()), s.get("updated_at", _now())),
+            )
+            sid = cur.lastrowid
+            for m in s.get("messages", []):
+                conn.execute(
+                    "INSERT INTO messages (session_id, role, content, dtsearch_result, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (sid, m["role"], m["content"],
+                     json.dumps(m["dtsearch_result"]) if m.get("dtsearch_result") else None,
+                     m.get("created_at", _now())),
+                )
+        conn.close()
+        count += 1
+    return count
