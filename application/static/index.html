@@ -631,7 +631,7 @@ document.getElementById('fileUpload').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
-  setProcessing(true, 'Uploading file\u2026');
+  setProcessing(true, 'Reading document\u2026 (this may take up to 30s for large or scanned files)');
   const form = new FormData();
   form.append('file', file);
   let uploadData;
