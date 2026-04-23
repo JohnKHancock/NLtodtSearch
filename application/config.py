@@ -12,6 +12,20 @@ DB_PATH = os.getenv("DB_PATH", "sessions.db")
 
 
 def load_demo_users() -> list[tuple[str, str]]:
+    # Format: USERS=username1:password1,username2:password2
+    users_env = os.getenv("USERS")
+    if users_env:
+        users = []
+        for entry in users_env.split(","):
+            entry = entry.strip()
+            if ":" in entry:
+                username, password = entry.split(":", 1)
+                if username.strip() and password.strip():
+                    users.append((username.strip(), password.strip()))
+        if users:
+            return users
+
+    # Fallback: DEMO_USER_1/DEMO_PASS_1 ... DEMO_USER_20/DEMO_PASS_20
     users = []
     for i in range(1, 21):
         u = os.getenv(f"DEMO_USER_{i}")
