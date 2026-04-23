@@ -56,7 +56,7 @@ async def login(request: Request, response: Response):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = secrets.token_hex(32)
     _sessions[token] = username
-    response.set_cookie("session", token, httponly=True, samesite="lax")
+    response.set_cookie("session", token, httponly=True, samesite="none", secure=True)
     return {"username": username}
 
 
