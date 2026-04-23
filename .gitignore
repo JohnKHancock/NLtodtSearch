@@ -12,4 +12,13 @@ wheels/
 # Ignore environment variable files
 .env
 
+# Supporting/test documents
+supporting documents/
+
+# SQLite session database
+*.db
+
+# Pytest cache
+.pytest_cache/
+
 
