@@ -637,6 +637,7 @@ document.getElementById('fileUpload').addEventListener('change', async e => {
   let uploadData;
   try {
     const r = await fetch('/api/upload', {method: 'POST', body: form});
+    if (r.status === 401) { showLogin(); return; }
     if (!r.ok) {
       const err = await r.json().catch(()=>({}));
       setStatus(err.detail || 'Upload failed', true);
