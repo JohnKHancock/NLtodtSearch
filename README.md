@@ -1,3 +1,13 @@
+---
+title: NLtodtSearch
+emoji: 🔍
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # NL-to-dtSearch
 
 A demonstration application that converts natural language descriptions into valid [dtSearch](https://www.dtsearch.com/) query syntax. Targeted at eDiscovery professionals who work with dtSearch-indexed document corpuses in legal review and investigation contexts.
