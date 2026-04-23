@@ -1,16 +1,18 @@
+import base64
 import json
 import os
 import secrets
 import tempfile
 from typing import Optional
 
+import anthropic
 import uvicorn
 from fastapi import Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import iterate_in_threadpool
 
-from config import MAX_FILE_SIZE_MB, MAX_INPUT_CHARS, load_demo_users
+from config import MAX_FILE_SIZE_MB, MAX_INPUT_CHARS, MODEL, load_demo_users
 from core.converter import DTSearchConverter
 from core.prompt_builder import PromptBuilder
 from core.validator import DTSearchValidator
@@ -108,19 +110,89 @@ async def save_feedback(request: Request, username: str = Depends(_require_auth)
 
 # ── File upload ───────────────────────────────────────────────────────────────
 
+_IMAGE_MEDIA_TYPES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+_SUPPORTED_EXTS = {".pdf", ".docx", ".txt"} | set(_IMAGE_MEDIA_TYPES)
+
+_ocr_client = anthropic.Anthropic()
+
+
+def _ocr_images_with_claude(image_blocks: list[dict]) -> str:
+    """Send image blocks to Claude and return extracted text."""
+    content = image_blocks + [{
+        "type": "text",
+        "text": (
+            "Please extract all text from this document image. "
+            "Return only the extracted text, preserving layout where possible."
+        ),
+    }]
+    response = _ocr_client.messages.create(
+        model=MODEL,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": content}],
+    )
+    return response.content[0].text if response.content else ""
+
+
 def _extract_file_text(filepath: str, filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
     size_mb = os.path.getsize(filepath) / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
         raise ValueError(f"File exceeds {MAX_FILE_SIZE_MB} MB limit ({size_mb:.1f} MB)")
+
     if ext == ".pdf":
         try:
-            import PyPDF2
-            with open(filepath, "rb") as f:
-                reader = PyPDF2.PdfReader(f)
-                return "\n".join(page.extract_text() or "" for page in reader.pages)
+            import fitz  # PyMuPDF
+            doc = fitz.open(filepath)
+            text = "\n".join(page.get_text() for page in doc)
+            if len(text.strip()) >= 100:
+                doc.close()
+                return text
+            # Image-based PDF — render pages and OCR via Claude vision
+            max_pages = 5
+            image_blocks = []
+            for i, page in enumerate(doc):
+                if i >= max_pages:
+                    break
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                img_bytes = pix.tobytes("png")
+                image_blocks.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/png",
+                        "data": base64.b64encode(img_bytes).decode(),
+                    },
+                })
+            doc.close()
+            if not image_blocks:
+                return ""
+            return _ocr_images_with_claude(image_blocks)
+        except ImportError:
+            raise ValueError(
+                "PDF processing library (PyMuPDF) is not installed. "
+                "Run: pip install PyMuPDF"
+            )
         except Exception as e:
             raise ValueError(f"Failed to read PDF: {e}")
+
+    if ext in _IMAGE_MEDIA_TYPES:
+        with open(filepath, "rb") as f:
+            img_data = f.read()
+        image_blocks = [{
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": _IMAGE_MEDIA_TYPES[ext],
+                "data": base64.b64encode(img_data).decode(),
+            },
+        }]
+        return _ocr_images_with_claude(image_blocks)
+
     if ext == ".docx":
         try:
             from docx import Document
@@ -128,10 +200,15 @@ def _extract_file_text(filepath: str, filename: str) -> str:
             return "\n".join(p.text for p in doc.paragraphs)
         except Exception as e:
             raise ValueError(f"Failed to read DOCX: {e}")
+
     if ext == ".txt":
         with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             return f.read()
-    raise ValueError(f"Unsupported file type '{ext}'. Please upload PDF, DOCX, or TXT.")
+
+    raise ValueError(
+        f"Unsupported file type '{ext}'. "
+        "Please upload PDF, DOCX, TXT, PNG, JPG, or WEBP."
+    )
 
 
 @app.post("/api/upload")
@@ -144,7 +221,7 @@ async def upload_file(
     if size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(400, f"File exceeds {MAX_FILE_SIZE_MB} MB limit")
     ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in {".pdf", ".docx", ".txt"}:
+    if ext not in _SUPPORTED_EXTS:
         raise HTTPException(400, f"Unsupported file type '{ext}'")
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)

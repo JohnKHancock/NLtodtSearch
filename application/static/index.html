@@ -105,6 +105,7 @@
     /* ── Misc ──────────────────────────────────────────────────────────────── */
     .toolbar { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-top: 0.4rem; }
     #statusMsg { font-size: 0.78rem; margin-left: auto; }
+    label.btn.disabled { pointer-events: none; opacity: 0.65; }
   </style>
 </head>
 <body>
@@ -136,7 +137,7 @@
     <span class="navbar-brand fw-bold mb-0 h1" style="font-size:1rem">NL-to-dtSearch</span>
     <div class="d-flex align-items-center gap-2">
       <span id="welcomeMsg" class="text-muted small"></span>
-      <button id="themeToggle" class="btn btn-sm btn-outline-secondary">🌙 Dark</button>
+      <button id="themeToggle" class="btn btn-sm btn-outline-secondary">Dark</button>
       <button id="logoutBtn" class="btn btn-sm btn-outline-secondary">Sign Out</button>
     </div>
   </nav>
@@ -167,15 +168,18 @@
         <div class="input-group">
           <textarea id="messageInput" class="form-control" rows="2"
             placeholder="Describe what you want to find (e.g., 'emails from acme.com about invoices')..."></textarea>
-          <button id="sendBtn" class="btn btn-primary px-3">Send</button>
+          <button id="sendBtn" class="btn btn-primary px-3">
+            <span id="sendSpinner" class="spinner-border spinner-border-sm me-1 d-none" role="status" aria-hidden="true"></span>
+            <span id="sendLabel">Send</span>
+          </button>
         </div>
         <div class="toolbar">
           <label class="btn btn-sm btn-outline-secondary mb-0">
-            📎 Upload Document
-            <input type="file" id="fileUpload" class="d-none" accept=".pdf,.docx,.txt">
+            Upload Document
+            <input type="file" id="fileUpload" class="d-none" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp">
           </label>
-          <button id="downloadBtn" class="btn btn-sm btn-outline-secondary">⬇ History</button>
-          <button id="clearBtn" class="btn btn-sm btn-outline-secondary">🗑 Clear</button>
+          <button id="downloadBtn" class="btn btn-sm btn-outline-secondary">History</button>
+          <button id="clearBtn" class="btn btn-sm btn-outline-secondary">Clear</button>
           <span id="statusMsg" class="text-muted"></span>
         </div>
       </div>
@@ -272,8 +276,14 @@ const state = {
 function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+function stripEmoji(text) {
+  return (text || '').replace(
+    /[\u{1F000}-\u{1FFFF}\u{2600}-\u{27FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}\u{1FA00}-\u{1FA9F}]/gu,
+    ''
+  );
+}
 function md(text) {
-  try { return marked.parse(text || ''); } catch { return esc(text || ''); }
+  try { return marked.parse(stripEmoji(text)); } catch { return esc(stripEmoji(text || '')); }
 }
 function setStatus(msg, isError = false) {
   const el = document.getElementById('statusMsg');
@@ -295,7 +305,7 @@ function copyQuery() {
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-bs-theme', theme);
   const btn = document.getElementById('themeToggle');
-  if (btn) btn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+  if (btn) btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
   localStorage.setItem('theme', theme);
 }
 
@@ -514,10 +524,10 @@ function showResults(toolResult, validationWarning) {
   document.getElementById('confidenceValue').innerHTML =
     `<span class="confidence-pill confidence-${conf}">${conf || 'N/A'}</span>`;
   const warnings = [];
-  if (validationWarning) warnings.push(`⚠️ ${validationWarning}`);
-  if (toolResult.confidence === 'low') warnings.push('⚠️ Low confidence — consider rephrasing or adding more detail.');
+  if (validationWarning) warnings.push(validationWarning);
+  if (toolResult.confidence === 'low') warnings.push('Low confidence — consider rephrasing or adding more detail.');
   const warnEl = document.getElementById('warningBox');
-  if (warnings.length) { warnEl.textContent = warnings.join('\n'); warnEl.classList.remove('d-none'); }
+  if (warnings.length) { warnEl.innerHTML = warnings.map(w => esc(w)).join('<br>'); warnEl.classList.remove('d-none'); }
   else warnEl.classList.add('d-none');
   document.getElementById('resultSection').classList.remove('d-none');
   document.getElementById('emptyResults').classList.add('d-none');
@@ -566,8 +576,7 @@ async function sendMessage() {
   const message = input.value.trim();
   if (!message) return;
   input.value = '';
-  setSendDisabled(true);
-  setStatus('Thinking…');
+  setProcessing(true, 'Thinking\u2026');
   appendMessage('user', message);
   const bubble = appendMessage('assistant', '');
   bubble.innerHTML = '<span class="typing">Thinking\u2026</span>';
@@ -588,14 +597,30 @@ async function sendMessage() {
     },
     msg => { bubble.innerHTML = `<strong>Error:</strong> ${esc(msg)}`; setStatus('', false); },
   );
-  setSendDisabled(false);
+  setProcessing(false);
   input.focus();
 }
 
-function setSendDisabled(disabled) {
-  document.getElementById('sendBtn').disabled = disabled;
-  document.getElementById('messageInput').disabled = disabled;
+function setProcessing(busy, statusText) {
+  const sendBtn   = document.getElementById('sendBtn');
+  const msgInput  = document.getElementById('messageInput');
+  const spinner   = document.getElementById('sendSpinner');
+  const sendLabel = document.getElementById('sendLabel');
+  const uploadLbl = document.getElementById('fileUpload').closest('label');
+  const dlBtn     = document.getElementById('downloadBtn');
+  const clrBtn    = document.getElementById('clearBtn');
+
+  sendBtn.disabled  = busy;
+  msgInput.disabled = busy;
+  dlBtn.disabled    = busy;
+  clrBtn.disabled   = busy;
+  uploadLbl.classList.toggle('disabled', busy);
+  spinner.classList.toggle('d-none', !busy);
+  sendLabel.textContent = busy ? 'Working\u2026' : 'Send';
+
+  if (statusText) setStatus(statusText);
 }
+
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
 document.getElementById('messageInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -606,20 +631,29 @@ document.getElementById('fileUpload').addEventListener('change', async e => {
   const file = e.target.files[0];
   if (!file) return;
   e.target.value = '';
-  setStatus('Uploading…');
+  setProcessing(true, 'Uploading file\u2026');
   const form = new FormData();
   form.append('file', file);
   let uploadData;
   try {
     const r = await fetch('/api/upload', {method: 'POST', body: form});
-    if (!r.ok) { const err = await r.json().catch(()=>({})); setStatus(err.detail||'Upload failed', true); return; }
+    if (!r.ok) {
+      const err = await r.json().catch(()=>({}));
+      setStatus(err.detail || 'Upload failed', true);
+      setProcessing(false);
+      return;
+    }
     uploadData = await r.json();
-  } catch (err) { setStatus('Upload error: ' + err.message, true); return; }
+  } catch (err) {
+    setStatus('Upload error: ' + err.message, true);
+    setProcessing(false);
+    return;
+  }
   const {text, filename} = uploadData;
-  setStatus('Analyzing…');
+  setProcessing(true, 'Analyzing document\u2026');
   appendMessage('user', `[Uploaded document: ${filename}]`);
   const bubble = appendMessage('assistant', '');
-  bubble.innerHTML = '<span class="typing">Analyzing\u2026</span>';
+  bubble.innerHTML = '<span class="typing">Analyzing document\u2026</span>';
   let fullText = '';
   await streamSSE(
     '/api/analyze/stream',
@@ -637,6 +671,7 @@ document.getElementById('fileUpload').addEventListener('change', async e => {
     },
     msg => { bubble.innerHTML = `<strong>Error:</strong> ${esc(msg)}`; setStatus('', false); },
   );
+  setProcessing(false);
 });
 
 // ── Toolbar ────────────────────────────────────────────────────────────────
@@ -671,7 +706,7 @@ async function postFeedback(rating, comment = null) {
     body: JSON.stringify({message_id: state.lastMessageId, rating, comment}),
   });
   const el = document.getElementById('feedbackStatus');
-  el.textContent = '✓ Feedback recorded. Thank you!';
+  el.textContent = 'Feedback recorded. Thank you!';
   el.classList.remove('d-none');
 }
 document.getElementById('correctBtn').addEventListener('click', () => postFeedback('correct'));

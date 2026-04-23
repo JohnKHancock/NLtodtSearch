@@ -83,6 +83,7 @@ Confidence: high
 - If the query cannot be accurately expressed in dtSearch syntax, say so and explain the limitation rather than approximating.
 - Do not guess at specific names, dates, or entities — use only what the user has provided.
 - If the user uploads a document, extract key names, entities, dates, and concepts and suggest search terms — do not attempt to generate a single query from the entire document.
+- Do not use emoji or icon characters anywhere in your responses. Use plain text and markdown formatting only.
 """
 
 DTSEARCH_TOOL = {

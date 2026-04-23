@@ -1,7 +1,7 @@
 # NL-to-dtSearch: Implementation Plan
 
-**Version:** 1.2  
-**Date:** 2026-04-16  
+**Version:** 1.3  
+**Date:** 2026-04-23  
 **Scope:** Demonstration application  
 **Audience:** eDiscovery professionals  
 **Hosting:** Hugging Face Spaces
@@ -396,15 +396,22 @@ Incorrect answers reported via the feedback mechanism (Section 5.3) are stored i
 
 Document upload is integrated into the main chat (not a separate mode).
 
-**Supported formats:** PDF, DOCX, TXT  
+**Supported formats:** PDF, DOCX, TXT, PNG, JPG, WEBP  
 **Flow:**
 1. User uploads a file via the upload button in the center column
-2. The file content is extracted (using `PyPDF2` for PDF, `python-docx` for DOCX, plain read for TXT)
+2. The file content is extracted:
+   - **PDF (text-based):** `PyMuPDF` extracts embedded text directly
+   - **PDF (image-based / scanned):** `PyMuPDF` renders pages as images; Claude vision API performs OCR (up to 5 pages)
+   - **Images (PNG, JPG, WEBP):** Sent directly to Claude vision API for text extraction
+   - **DOCX:** `python-docx` extracts paragraph text
+   - **TXT:** Plain UTF-8 read
 3. The extracted text is passed to the LLM with a prompt: "Review this document and suggest dtSearch search terms organized by: people/entities, dates, key concepts, and financial/transaction terms."
 4. The LLM response appears in the chat as a structured list of suggested terms
 5. The user can then follow up by asking: "Build a query for [term from the list]"
 
 **Token limit guard:** If the extracted text exceeds ~50,000 characters, truncate and notify the user.
+
+**OCR note:** Image-based PDFs and image uploads use the Claude vision API for text recognition. A PDF is classified as image-based when embedded text extraction yields fewer than 100 characters.
 
 ### Document Context Persistence
 
@@ -512,9 +519,11 @@ def load_demo_users() -> list[tuple[str, str]]:
 
 ```
 anthropic>=0.25.0
-gradio>=4.44.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+python-multipart>=0.0.6
 python-dotenv>=1.0.0
-PyPDF2>=3.0.0
+PyMuPDF>=1.24.0
 python-docx>=1.0.0
 pytest>=8.0.0
 pytest-mock>=3.0.0
