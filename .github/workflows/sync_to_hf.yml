@@ -1,4 +1,4 @@
-name: Sync to HuggingFace
+name: Sync to Hugging Face
 
 on:
   push:
@@ -8,15 +8,21 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: "0"
-          lfs: "true"
 
-      - name: Push to HuggingFace Space
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to Hugging Face Space
         env:
-          HF_TOKEN: "${{ secrets.HF_TOKEN }}"
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git remote add hf https://user:$HF_TOKEN@huggingface.co/spaces/jkhancock/jkhancock/NLtodtSearch
+          git config --global user.email "github-actions@github.com"
+          git config --global user.name "github-actions"
+
+          git remote add hf https://user:${HF_TOKEN}@huggingface.co/spaces/jkhancock/NLtodtSearch
+
           git push hf main --force
