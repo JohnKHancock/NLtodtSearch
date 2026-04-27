@@ -74,4 +74,4 @@ Boolean (`AND`, `OR`, `NOT`), proximity (`W/N`, `PRE/N`), wildcards (`?`, `*`, `
 
 ## Disclaimer
 
-Queries produced by this app are suggestions. Verify syntax and results before use in legal proceedings. Check.
+Queries produced by this app are suggestions. Verify syntax and results before use in legal proceedings. Check2.
