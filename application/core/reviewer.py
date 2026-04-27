@@ -1,6 +1,9 @@
 import json
+import logging
 import os
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -103,7 +106,8 @@ class ResponseReviewer:
                 review_notes=data.get("review_notes", ""),
                 reviewer_model=REVIEWER_MODEL,
             )
-        except Exception:
+        except Exception as exc:
+            logger.error("Reviewer OpenAI call failed: %s", exc, exc_info=True)
             return ReviewResult(
                 status="failed",
                 review_notes="Review service unavailable.",
