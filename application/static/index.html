@@ -87,6 +87,10 @@
     .confidence-LOW    { background: #fee2e2; color: #991b1b; }
     .disclaimer { font-size: 0.72rem; color: var(--bs-secondary-color); font-style: italic; }
 
+    /* ── Reviewed query section ─────────────────────────────────────────────── */
+    .reviewed-label { color: #92400e; }
+    .reviewed-value { border-color: #f59e0b !important; }
+
     /* ── Dark mode custom overrides ────────────────────────────────────────── */
     [data-bs-theme="light"] { --bubble-asst-bg: #f1f3f5; }
     [data-bs-theme="dark"]  { --bubble-asst-bg: #2b2d31; }
@@ -94,6 +98,8 @@
     [data-bs-theme="dark"] .confidence-MEDIUM { background: #78350f; color: #fcd34d; }
     [data-bs-theme="dark"] .confidence-LOW    { background: #7f1d1d; color: #fca5a5; }
     [data-bs-theme="dark"] .result-value.query { color: #60a5fa; }
+    [data-bs-theme="dark"] .reviewed-label { color: #fcd34d; }
+    [data-bs-theme="dark"] .reviewed-value { border-color: #b45309 !important; }
 
     /* ── Login overlay ─────────────────────────────────────────────────────── */
     #loginOverlay {
@@ -187,30 +193,39 @@
 
     <div class="resize-divider" id="dividerRight" title="Drag to resize"></div>
 
-    <!-- Right: Query results -->
+    <!-- Right: Query Review -->
     <div class="results-col" id="resultsCol">
-      <h6 class="mb-3" style="font-size:.85rem">Query Result</h6>
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <h6 style="font-size:.85rem;margin:0">Query Review</h6>
+        <button id="copyBtn" class="btn btn-sm btn-outline-secondary d-none" onclick="copyQuery()">Copy Query</button>
+      </div>
 
       <div id="resultSection" class="d-none">
-        <div class="mb-2">
-          <div class="d-flex justify-content-between align-items-center mb-1">
-            <span class="result-label">dtSearch Query</span>
-            <button class="btn btn-link btn-sm p-0" style="font-size:.7rem" onclick="copyQuery()">Copy</button>
-          </div>
-          <div id="queryValue" class="result-value query"></div>
+        <!-- Verification -->
+        <div class="mb-3">
+          <div class="result-label mb-1">Verification</div>
+          <div id="verificationBadge"><span class="badge bg-secondary" style="font-size:.75rem">&#9675; Unverified</span></div>
+          <div id="reviewNotes" class="text-muted mt-1 d-none" style="font-size:.72rem;font-style:italic"></div>
         </div>
-        <div class="mb-2">
-          <div class="result-label">Explanation</div>
-          <div id="explanationValue" class="result-value"></div>
+
+        <!-- Issues found by reviewer -->
+        <div class="mb-2 d-none" id="reviewIssuesSection">
+          <div class="result-label">Issues Found</div>
+          <div id="reviewIssuesValue" class="result-value" style="font-size:.82rem;white-space:pre-wrap"></div>
         </div>
-        <div class="mb-2">
-          <div class="result-label">Alternative Queries</div>
-          <div id="alternativesValue" class="result-value"></div>
+
+        <!-- Corrected query (when reviewer has corrections) -->
+        <div class="mb-2 d-none" id="reviewedQuerySection">
+          <div class="result-label reviewed-label" id="reviewedQueryLabel">Corrected Query</div>
+          <div id="reviewedQueryValue" class="result-value query reviewed-value"></div>
         </div>
+
+        <!-- Confidence -->
         <div class="mb-2">
           <div class="result-label">Confidence</div>
           <div id="confidenceValue"></div>
         </div>
+
         <div id="warningBox" class="alert alert-warning py-2 d-none small mb-2"></div>
         <div class="disclaimer mb-3">
           This query is a suggestion. Verify syntax and results before use in legal proceedings.
@@ -231,7 +246,7 @@
       </div>
 
       <div id="emptyResults" class="text-muted small">
-        Results will appear here after your first query.
+        Submit a query to see the verification review here.
       </div>
     </div>
 
@@ -270,6 +285,7 @@ const state = {
   username: null, sessionId: null, history: [],
   lastMessageId: null, sessions: [], selectedSessionId: null,
   documentContext: null,  // {text, filename} — re-injected into every chat request
+  queryToCopy: null,      // reviewed query when corrections exist, otherwise original
 };
 
 // ── Utilities ──────────────────────────────────────────────────────────────
@@ -292,8 +308,8 @@ function setStatus(msg, isError = false) {
   el.style.marginLeft = 'auto';
 }
 function copyQuery() {
-  navigator.clipboard.writeText(document.getElementById('queryValue').textContent)
-    .then(() => setStatus('Copied!'));
+  const text = state.queryToCopy || '';
+  navigator.clipboard.writeText(text).then(() => setStatus('Copied!'));
 }
 
 // ── Theme toggle ───────────────────────────────────────────────────────────
@@ -467,14 +483,18 @@ async function loadSession(sessionId) {
   document.getElementById('chatMessages').innerHTML = '';
   let lastToolResult = null, lastMsgId = null;
   for (const msg of (data.messages || [])) {
-    appendMessage(msg.role, msg.content);
-    state.history.push({role: msg.role, content: msg.content});
+    // Display: format tool results inline in the chat bubble
+    let displayContent = msg.content || '';
     if (msg.role === 'assistant' && msg.dtsearch_result) {
+      displayContent = formatToolResult(msg.content, msg.dtsearch_result);
       lastToolResult = msg.dtsearch_result; lastMsgId = msg.id;
     }
+    appendMessage(msg.role, displayContent);
+    // LLM history uses the stored content (concise), not the formatted display version
+    state.history.push({role: msg.role, content: msg.content});
   }
   state.lastMessageId = lastMsgId;
-  if (lastToolResult) showResults(lastToolResult, null);
+  if (lastToolResult) showResults(lastToolResult, null, lastToolResult._review || null);
   renderSessionList();
 }
 
@@ -513,22 +533,92 @@ function appendMessage(role, content) {
   return bubble;
 }
 
-function showResults(toolResult, validationWarning) {
+// Build a markdown string from Claude's tool result for display in the center column.
+// Deduplicates the explanation when fullText is already just the explanation (pure tool-use).
+function formatToolResult(fullText, toolResult) {
+  if (!toolResult) return (fullText || '').trim();
+  const parts = [];
+  const prefix = (fullText || '').trim();
+  const explanation = (toolResult.explanation || '').trim();
+  if (prefix && prefix !== explanation) parts.push(prefix);
+  const query = toolResult.dtSearch_query || '';
+  if (query) parts.push('**dtSearch Query:**\n```\n' + query + '\n```');
+  if (explanation) parts.push('**What this query does:** ' + explanation);
+  const alts = toolResult.alternatives || [];
+  if (alts.length) {
+    const lines = ['**Alternative queries:**'];
+    alts.forEach((a, i) => lines.push(`${i + 1}. \`${a.query || ''}\` — ${a.strategy || ''}`));
+    parts.push(lines.join('\n'));
+  }
+  return parts.join('\n\n');
+}
+
+function showResults(toolResult, validationWarning, reviewResult) {
   if (!toolResult) return;
-  document.getElementById('queryValue').textContent = toolResult.dtSearch_query || '';
-  document.getElementById('explanationValue').textContent = toolResult.explanation || '';
-  const alts = (toolResult.alternatives || [])
-    .map((a, i) => `${i+1}. ${a.query||''} — ${a.strategy||''}`).join('\n') || 'None provided';
-  document.getElementById('alternativesValue').textContent = alts;
+
+  const hasCorrections = reviewResult &&
+    reviewResult.status === 'corrections_needed' &&
+    reviewResult.corrected_query;
+
+  // The copy button always copies the best available query
+  state.queryToCopy = hasCorrections
+    ? reviewResult.corrected_query
+    : (toolResult.dtSearch_query || '');
+  document.getElementById('copyBtn').classList.remove('d-none');
+
+  // Verification badge
+  const badge = document.getElementById('verificationBadge');
+  const notesEl = document.getElementById('reviewNotes');
+  if (!reviewResult || reviewResult.status === 'failed') {
+    badge.innerHTML = '<span class="badge bg-secondary" style="font-size:.75rem">&#9675; Unverified</span>';
+    notesEl.classList.add('d-none');
+  } else if (reviewResult.status === 'approved') {
+    const model = esc(reviewResult.reviewer_model || 'GPT-4o-mini');
+    badge.innerHTML = `<span class="badge bg-success" style="font-size:.75rem">&#10003; Verified by ${model}</span>`;
+    notesEl.textContent = reviewResult.review_notes || '';
+    notesEl.classList.toggle('d-none', !reviewResult.review_notes);
+  } else {
+    const model = esc(reviewResult.reviewer_model || 'GPT-4o-mini');
+    badge.innerHTML = `<span class="badge bg-warning text-dark" style="font-size:.75rem">&#9888; Reviewed by ${model} — corrections applied</span>`;
+    notesEl.textContent = reviewResult.review_notes || '';
+    notesEl.classList.toggle('d-none', !reviewResult.review_notes);
+  }
+
+  // Issues
+  const issuesSection = document.getElementById('reviewIssuesSection');
+  const issues = reviewResult && reviewResult.issues && reviewResult.issues.length
+    ? reviewResult.issues : [];
+  if (issues.length) {
+    document.getElementById('reviewIssuesValue').textContent = issues.join('\n');
+    issuesSection.classList.remove('d-none');
+  } else {
+    issuesSection.classList.add('d-none');
+  }
+
+  // Corrected query (when reviewer has one)
+  const reviewedSection = document.getElementById('reviewedQuerySection');
+  if (hasCorrections) {
+    const model = reviewResult.reviewer_model || 'GPT-4o-mini';
+    document.getElementById('reviewedQueryLabel').textContent = `Corrected Query (${model})`;
+    document.getElementById('reviewedQueryValue').textContent = reviewResult.corrected_query;
+    reviewedSection.classList.remove('d-none');
+  } else {
+    reviewedSection.classList.add('d-none');
+  }
+
+  // Confidence
   const conf = (toolResult.confidence || '').toUpperCase();
   document.getElementById('confidenceValue').innerHTML =
     `<span class="confidence-pill confidence-${conf}">${conf || 'N/A'}</span>`;
+
+  // Warnings
   const warnings = [];
   if (validationWarning) warnings.push(validationWarning);
   if (toolResult.confidence === 'low') warnings.push('Low confidence — consider rephrasing or adding more detail.');
   const warnEl = document.getElementById('warningBox');
   if (warnings.length) { warnEl.innerHTML = warnings.map(w => esc(w)).join('<br>'); warnEl.classList.remove('d-none'); }
   else warnEl.classList.add('d-none');
+
   document.getElementById('resultSection').classList.remove('d-none');
   document.getElementById('emptyResults').classList.add('d-none');
   document.getElementById('incorrectForm').classList.add('d-none');
@@ -540,6 +630,7 @@ function clearResults() {
   document.getElementById('resultSection').classList.add('d-none');
   document.getElementById('emptyResults').classList.remove('d-none');
   document.getElementById('warningBox').classList.add('d-none');
+  document.getElementById('copyBtn').classList.add('d-none');
 }
 
 async function streamSSE(url, body, onText, onDone, onError) {
@@ -592,7 +683,14 @@ async function sendMessage() {
     async event => {
       state.sessionId = event.session_id; state.history = event.new_history;
       state.lastMessageId = event.message_id; state.selectedSessionId = event.session_id;
-      if (event.tool_result) showResults(event.tool_result, event.validation_warning);
+      // Always render the full formatted response (query + explanation + alternatives)
+      // in the center column, whether Claude streamed text or went straight to tool-use.
+      if (event.tool_result) {
+        bubble.innerHTML = md(formatToolResult(fullText, event.tool_result));
+      } else if (!fullText) {
+        bubble.innerHTML = '';
+      }
+      if (event.tool_result) showResults(event.tool_result, event.validation_warning, event.review_result || null);
       await loadSessions(); setStatus('');
     },
     msg => { bubble.innerHTML = `<strong>Error:</strong> ${esc(msg)}`; setStatus('', false); },

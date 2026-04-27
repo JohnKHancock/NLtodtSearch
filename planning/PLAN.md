@@ -116,7 +116,10 @@ Three-column Gradio layout using `gr.Blocks`.
 ### 5.2 Center Column — Main Interaction
 
 - **Welcome banner** (shown on first load): "Welcome, [username], to NL-to-dtSearch." with an optional quick tour button
-- **Chat area** (`gr.Chatbot`) — conversation with the LLM, streaming enabled
+- **Chat area** — all conversation with the LLM appears here, streaming enabled. Every response — including the dtSearch query, explanation, and alternative queries — is rendered as part of the chat. Query responses are formatted inline:
+  - `**dtSearch Query:**` in a fenced code block
+  - `**What this query does:**` plain-English explanation
+  - `**Alternative queries:**` numbered list of variants with strategy labels
 - **Input row:**
   - Text input box for natural language query
   - Submit button
@@ -126,21 +129,22 @@ Three-column Gradio layout using `gr.Blocks`.
   - "Clear Chat" — clears center and right columns, starts new session
   - "Save Session" — saves current session to SQLite with auto-generated name
 
-### 5.3 Right Column — Structured Output Panel
+### 5.3 Right Column — Query Review Panel
 
-Updated on every LLM response that produces a dtSearch query. Fields:
+Updated on every LLM response that produces a dtSearch query. The right column shows **only** the independent reviewer's assessment (see Section 9.6), the confidence indicator, and the feedback buttons. Claude's query, explanation, and alternatives are in the center column.
 
-- **dtSearch Query** — formatted in a code block, with a one-click copy button
-- **Explanation** — plain English description of what the query does
-- **Alternative Queries** — up to 3 variants (fuzzy, wildcard, phrase) with a label for each strategy
-- **Confidence** — `High / Medium / Low` indicator
+- **Copy Query** button — copies the best available query: the reviewer's corrected version if corrections were made, otherwise Claude's original
+- **Verification** — badge showing the reviewer's verdict (Verified / Corrections Applied / Unverified), plus a one-sentence review note
+- **Issues Found** — visible only when the reviewer identifies specific problems; lists each issue
+- **Corrected Query** — visible only when the reviewer has a corrected version; shows the reviewer's improved query
+- **Confidence** — `High / Medium / Low` indicator from Claude
 - **Disclaimer** — a fixed note: *"This query is a suggestion. Verify syntax and results before use in legal proceedings."*
 - **Feedback row** — two buttons: "✓ Correct" and "✗ Incorrect"
   - "✓ Correct" logs a positive feedback record to SQLite (silent, no UI change beyond a brief confirmation)
   - "✗ Incorrect" opens a small inline form asking: "What was wrong?" (free text, optional) + "Submit Feedback"
   - Both feedback actions are tied to the specific `message_id` in SQLite so feedback is traceable to the exact query and response
 
-If the user's message is conversational (greeting, clarification question) and no query is produced, the right column retains the last result and the feedback buttons are hidden.
+If the user's message is conversational (greeting, clarification question) and no query is produced, the right column retains the last result.
 
 ### 5.4 Quick Tour
 
@@ -389,6 +393,47 @@ This disclaimer is non-dismissible and always visible when a query is displayed.
 Incorrect answers reported via the feedback mechanism (Section 5.3) are stored in the `feedback` table. These records serve two purposes:
 1. **Immediate:** The logged-in user's feedback is visible in their session history so they can flag and return to problematic queries.
 2. **Long-term:** Accumulated feedback provides a curated dataset for improving the system prompt and few-shot examples in future iterations.
+
+### 9.6 Independent LLM Review (Response Verification)
+
+After Claude generates a dtSearch result, a second LLM from a different provider independently reviews the response before it is shown to the user. This provides genuine cross-model verification — not self-checking.
+
+**Reviewer model:** OpenAI `gpt-4o-mini` (configurable via `REVIEWER_MODEL` env var)  
+**New config keys:** `OPENAI_API_KEY` (HF Spaces secret), `REVIEWER_MODEL` (default: `gpt-4o-mini`)  
+**New files:** `core/reviewer.py` (`ResponseReviewer` class, `ReviewResult` dataclass)
+
+**What the reviewer checks:**
+- Syntactic correctness of the dtSearch query (balanced parentheses/quotes, valid operators only)
+- Accuracy — does the query match the user's stated intent?
+- Explanation accuracy — does the explanation correctly describe the query?
+
+**Reviewer output (structured JSON via `response_format: json_object`):**
+```json
+{
+  "status": "approved" | "corrections_needed",
+  "issues": ["list of specific issues"],
+  "corrected_query": "corrected query or null",
+  "corrected_explanation": "corrected explanation or null",
+  "review_notes": "one-sentence summary",
+  "reviewer_model": "gpt-4o-mini"
+}
+```
+
+**UI — Verification section in the right column (above the dtSearch Query field):**
+
+| Outcome | Badge |
+|---|---|
+| Approved | ✓ Verified by GPT-4o-mini (green) |
+| Corrections applied | ⚠ Reviewed by GPT-4o-mini — corrections applied (amber) |
+| Reviewer unavailable | ○ Unverified (gray) |
+
+When corrections are present, a **"Corrected Query"** row appears below the original query, styled in amber. The copy button defaults to the corrected query. If the reviewer also corrected the explanation, the explanation field shows the corrected version.
+
+**Timing:** The reviewer call runs synchronously in `stream_convert()` after Claude's stream completes, before the `done` SSE event is sent. Claude's text streams at full speed; the right column (including the badge) appears once the review finishes (~1–3 s after streaming ends).
+
+**Persistence:** The `review_result` dict is embedded in the `dtsearch_result` JSON stored in SQLite under a `_review` key, so the verification badge is correctly shown when loading past sessions.
+
+**Failure mode:** If `OPENAI_API_KEY` is absent or the reviewer call fails for any reason, the badge shows "Unverified" (gray) and Claude's original response is shown unmodified. The reviewer never blocks a response.
 
 ---
 

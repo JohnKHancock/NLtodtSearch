@@ -8,9 +8,10 @@ from core.validator import DTSearchValidator
 class DTSearchConverter:
     """Converts natural language to dtSearch queries using Claude with streaming and tool use."""
 
-    def __init__(self, prompt_builder: PromptBuilder, validator: DTSearchValidator):
+    def __init__(self, prompt_builder: PromptBuilder, validator: DTSearchValidator, reviewer=None):
         self._pb = prompt_builder
         self._validator = validator
+        self._reviewer = reviewer
         self._client = anthropic.Anthropic()
 
     def stream_convert(
@@ -96,11 +97,16 @@ class DTSearchConverter:
             # new_history excludes the doc prefix — it is re-injected fresh each call
             new_history = conv_messages + [{"role": "assistant", "content": assistant_text}] if assistant_text else conv_messages
 
+            review_result = None
+            if tool_result and self._reviewer:
+                review_result = self._reviewer.review(user_message, tool_result).to_dict()
+
             yield ("done", {
                 "text": full_text,
                 "tool_result": tool_result,
                 "new_history": new_history,
                 "validation_warning": validation_warning,
+                "review_result": review_result,
             })
 
         except anthropic.APIConnectionError:

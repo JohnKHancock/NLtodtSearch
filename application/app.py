@@ -15,6 +15,7 @@ from starlette.concurrency import iterate_in_threadpool
 from config import MAX_FILE_SIZE_MB, MAX_INPUT_CHARS, MODEL, load_demo_users
 from core.converter import DTSearchConverter
 from core.prompt_builder import PromptBuilder
+from core.reviewer import ResponseReviewer
 from core.validator import DTSearchValidator
 import core.db as db
 
@@ -22,7 +23,8 @@ db.init_db()
 
 _pb = PromptBuilder()
 _validator = DTSearchValidator()
-_converter = DTSearchConverter(_pb, _validator)
+_reviewer = ResponseReviewer()
+_converter = DTSearchConverter(_pb, _validator, _reviewer)
 
 VALID_USERS = dict(load_demo_users())
 _sessions: dict[str, str] = {}  # token → username
@@ -266,18 +268,23 @@ async def chat_stream(request: Request, username: str = Depends(_require_auth)):
 
             elif event_type == "done":
                 tool_result = data.get("tool_result")
+                review_result = data.get("review_result")
                 new_history = data.get("new_history", [])
                 validation_warning = data.get("validation_warning")
 
                 if _session_id is None:
                     _session_id = db.create_session(username, message[:40] or "New Session")
                 db.add_message(_session_id, "user", message)
-                assistant_text = full_text.strip() or (
-                    tool_result.get("explanation", "") if tool_result else ""
-                )
-                msg_id = db.add_message(_session_id, "assistant", assistant_text, tool_result)
+                # Store only conversational/streamed text; the explanation and query
+                # live in dtsearch_result and are formatted for display on the frontend.
+                assistant_text = full_text.strip()
+                # Embed review result in stored data so the badge replays on session load
+                stored_result = tool_result
+                if tool_result and review_result:
+                    stored_result = {**tool_result, "_review": review_result}
+                msg_id = db.add_message(_session_id, "assistant", assistant_text, stored_result)
 
-                yield f"data: {json.dumps({'type': 'done', 'tool_result': tool_result, 'new_history': new_history, 'session_id': _session_id, 'message_id': msg_id, 'validation_warning': validation_warning})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'tool_result': tool_result, 'review_result': review_result, 'new_history': new_history, 'session_id': _session_id, 'message_id': msg_id, 'validation_warning': validation_warning})}\n\n"
 
         yield "data: [DONE]\n\n"
 

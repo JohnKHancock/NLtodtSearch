@@ -10,6 +10,9 @@ MAX_FILE_SIZE_MB = 50
 MAX_HISTORY_TOKENS = 8000
 DB_PATH = os.getenv("DB_PATH", "sessions.db")
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+REVIEWER_MODEL = os.getenv("REVIEWER_MODEL", "gpt-4o-mini")
+
 
 def load_demo_users() -> list[tuple[str, str]]:
     # Format: USERS=username1:password1,username2:password2

@@ -15,7 +15,17 @@
       "Bash(python -c \"import gradio; print\\(gradio.__version__\\)\")",
       "Bash(python *)",
       "Bash(C:\\\\Users\\\\jkhan\\\\Documents\\\\Professional Development\\\\AI Engineering and Implementation\\\\PROJECTS\\\\proj_NLtodtSearch\\\\.venv\\\\Scripts\\\\python.exe *)",
-      "Bash(\"C:\\\\Users\\\\jkhan\\\\Documents\\\\Professional Development\\\\AI Engineering and Implementation\\\\PROJECTS\\\\proj_NLtodtSearch\\\\.venv\\\\Scripts\\\\pip.exe\" install PyMuPDF)"
+      "Bash(\"C:\\\\Users\\\\jkhan\\\\Documents\\\\Professional Development\\\\AI Engineering and Implementation\\\\PROJECTS\\\\proj_NLtodtSearch\\\\.venv\\\\Scripts\\\\pip.exe\" install PyMuPDF)",
+      "Bash(\"/c/Users/jkhan/Documents/Professional Development/AI Engineering and Implementation/PROJECTS/proj_NLtodtSearch/.venv/Scripts/python.exe\" -c \"import app\")",
+      "Bash(\"/c/Users/jkhan/Documents/Professional Development/AI Engineering and Implementation/PROJECTS/proj_NLtodtSearch/.venv/Scripts/python.exe\" -c \"import openai; print\\('openai ok'\\)\")",
+      "Bash(\"/c/Users/jkhan/Documents/Professional Development\\\\AI Engineering and Implementation/PROJECTS/proj_NLtodtSearch/.venv/Scripts/python.exe\" app.py)",
+      "Bash(curl -s http://localhost:7860/)",
+      "Bash(taskkill /F /IM python.exe)",
+      "PowerShell(Stop-Process *)",
+      "Bash(\"/c/Users/jkhan/Documents/Professional Development/AI Engineering and Implementation/PROJECTS/proj_NLtodtSearch/.venv/Scripts/python.exe\" app.py)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:7860/)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:7860/api/me)"
     ]
   }
 }
