@@ -24,6 +24,7 @@ db.init_db()
 _pb = PromptBuilder()
 _validator = DTSearchValidator()
 _reviewer = ResponseReviewer()
+print(f"[startup] Reviewer available: {_reviewer._available}", flush=True)
 _converter = DTSearchConverter(_pb, _validator, _reviewer)
 
 VALID_USERS = dict(load_demo_users())
