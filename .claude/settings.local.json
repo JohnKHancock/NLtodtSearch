@@ -28,7 +28,7 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:7860/api/me)",
       "Bash(curl -s \"https://huggingface.co/api/spaces/jkhancock/NLtodtSearch\")",
       "Bash(gh secret *)",
-      "Bash(curl -s -o /tmp/hf_logs_response.txt -w \"HTTP_STATUS:%{http_code}\\\\n\" -N -H \"Authorization: Bearer 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\" \"https://huggingface.co/api/spaces/jkhancock/NLtodtSearch/logs/run\" --max-time 8)"
+      "Bash(curl -s -o /tmp/hf_logs_response.txt -w \"HTTP_STATUS:%{http_code}\\\\n\" -N -H \"Authorization: Bearer hf_xzHhF\" \"https://huggingface.co/api/spaces/jkhancock/NLtodtSearch/logs/run\" --max-time 8)"
     ]
   }
 }
